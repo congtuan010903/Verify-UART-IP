@@ -1,0 +1,72 @@
+class dis_rx_fifo_empty_interrupt_test extends uart_base_test;
+	`uvm_component_utils(dis_rx_fifo_empty_interrupt_test)
+	
+	uvm_status_e       status;
+	uart_configuration uart_config2;
+	vip_tx_sequence		 seq;
+
+	//----------------------------------------
+	// Constructor
+	//----------------------------------------
+	function new(string name = "dis_rx_fifo_empty_interrupt_test", uvm_component parent);
+		super.new(name,parent);
+	endfunction
+
+	//-------------------------------------
+	// run phase
+	//-------------------------------------
+	virtual task run_phase(uvm_phase phase);
+		bit[7:0] rdata;
+		phase.raise_objection(this);
+
+		wait(ahb_vif.HRESETn === 1);
+
+		// config VIP
+		uart_config2 = uart_configuration::type_id::create("uart_config2");
+		uart_config2.baud_rate   = 115200;
+		uart_config2.data_width  = 8;
+		uart_config2.parity_mode = uart_configuration::PARITY_EVEN;
+		uart_config2.stop_bits   = 2;
+		`uvm_info(get_type_name(),"UART agent updating...",UVM_LOW)
+		env.uart_agt.update_config(uart_config2);
+		// config DUT
+		regmodel.IER.write(status,32'h00); #1ns;
+		if(uart_vif.interrupt === 1) // check before rx fifo has data
+			`uvm_error(get_type_name(),"RX FIFO is empty but interrupt is disable, cannot trigger")
+		regmodel.FSR.read(status,rdata);
+		if(rdata[3] === 1)
+			`uvm_info(get_type_name(),"RX FIFO is empty, rx fifo empty status = 1",UVM_LOW)
+		else
+			`uvm_error(get_type_name(),"RX FIFO is empty, rx fifo empty status must equal 1")
+
+		regmodel.MDR.write(status,32'h00); #(50*1ns);
+		regmodel.DLL.write(status,32'h36); #(50*1ns);
+		regmodel.LCR.write(status,32'h3F); #(50*1ns);
+
+		seq = vip_tx_sequence::type_id::create("seq");
+		seq.start(env.uart_agt.uart_seqcer);
+
+		regmodel.FSR.read(status,rdata); // check rx fifo has data
+		if(rdata[3] === 0)
+			`uvm_info(get_type_name(),"RX FIFO has data, rx fifo empty status is cleared",UVM_LOW)
+		else
+			`uvm_error(get_type_name(),"RX FIFO has data, rx fifo empty status must be cleared")
+		
+		regmodel.RBR.read(status,rdata);
+		env.uart_sb.update_rbr_data(rdata);
+
+		#1ns;
+		if(uart_vif.interrupt === 1) // check rx fifo empty
+			`uvm_error(get_type_name(),"RX FIFO is empty but interrupt is disable, cannot trigger")
+		regmodel.FSR.read(status,rdata);
+		if(rdata[3] === 1)
+			`uvm_info(get_type_name(),"RX FIFO is empty, rx fifo empty status = 1",UVM_LOW)
+		else
+			`uvm_error(get_type_name(),"RX FIFO is empty, rx fifo empty status must equal 1")
+
+		#((1.0e9/uart_config2.baud_rate)*1ns);
+
+		phase.drop_objection(this);
+	endtask
+
+endclass
